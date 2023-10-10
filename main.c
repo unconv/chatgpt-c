@@ -18,6 +18,7 @@
 #define SIDEBAR_COLOR (Color){45, 45, 45, 255}
 #define MESSAGE_INPUT_BACKGROUND (Color){55, 55, 55, 255}
 #define MESSAGE_COLOR (Color){255, 255, 255, 255}
+#define ASSISTANT_MESSAGE_BACKGROUND (Color){52, 52, 52, 255}
 
 #define MAX_MESSAGES 255
 #define MESSAGE_MAX_LEN 2048
@@ -26,7 +27,7 @@
 #define MESSAGE_INPUT_PADDING 25
 #define MESSAGE_INPUT_FONT_SIZE 30
 #define MESSAGE_FONT_SIZE 30
-#define MESSAGE_GAP 20
+#define MESSAGE_PADDING 40
 #define JSON_MAX_LEN 2048
 #define SCROLL_SPEED 20
 
@@ -174,15 +175,18 @@ void message_list_add( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int *me
     strncpy( message_list[(*message_count)++], message, MESSAGE_MAX_LEN );
 }
 
-Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint ) {
+Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 position, float fontSize, float spacing, Color text_color, Color background_color ) {
     int text_length = strlen( text );
 
     char line_buffer[LINE_MAX_LEN] = "\0";
     int line_index = 0;
 
-    int text_height = 0;
+    int message_height = MESSAGE_PADDING;
     int text_space_pos = -1;
     int line_space_pos = -1;
+
+    position.y += MESSAGE_PADDING;
+    bool is_first_line = true;
 
     for( int text_index = 0; text_index < text_length; text_index++, line_index++ ) {
         if( line_index > LINE_MAX_LEN - 2 ) {
@@ -198,27 +202,45 @@ Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 posit
         line_buffer[line_index] = text[text_index];
         line_buffer[line_index + 1] = '\0';
 
-        Vector2 text_size = MeasureTextEx( font, line_buffer, fontSize, spacing );
-        int line_width = text_size.x;
-        int line_height = text_size.y;
-
         bool is_newline = line_buffer[line_index] == '\n';
         bool is_last_character = text_index == text_length - 1;
         bool is_first_character = line_index == 0;
 
+        if( is_newline && ! is_last_character ) {
+            line_buffer[line_index] = '\0';
+        }
+
+        Vector2 text_size = MeasureTextEx( font, line_buffer, fontSize, spacing );
+        int line_width = text_size.x;
+        int line_height = text_size.y;
+
         if( line_width > width || is_newline || is_last_character ) {
             if( ! is_last_character && ! is_first_character )  {
-                if( line_space_pos > -1 ) {
+                if( line_space_pos > -1 && ! is_newline ) {
                     line_buffer[line_space_pos] = '\0';
                 } else {
                     line_buffer[line_index] = '\0';
                 }
             }
 
-            DrawTextEx( font, line_buffer, position, fontSize, spacing, tint );
+            int top_padding = 0;
+            if( is_first_line ) {
+                top_padding = MESSAGE_PADDING;
+                is_first_line = false;
+            }
+
+            DrawRectangle(
+                position.x - UI_GAP,
+                position.y - top_padding,
+                width + UI_GAP * 2,
+                line_height + MESSAGE_PADDING + top_padding,
+                background_color
+            );
+
+            DrawTextEx( font, line_buffer, position, fontSize, spacing, text_color );
 
             position.y += line_height;
-            text_height += line_height;
+            message_height += line_height + top_padding;
 
             if( ! is_newline && ! is_last_character && ! is_first_character ) {
                 if( line_space_pos > -1 ) {
@@ -231,10 +253,9 @@ Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 posit
             line_index = -1;
             line_space_pos = -1;
         }
-
     }
 
-    return (Vector2){width, text_height};
+    return (Vector2){width, message_height};
 }
 
 void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int message_count, Font font ) {
@@ -251,14 +272,14 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
     }
 
     int x = SIDEBAR_WIDTH + UI_GAP;
-    int y = UI_GAP + current_scroll;
+    int y = current_scroll;
     int width = GetRenderWidth() - SIDEBAR_WIDTH - UI_GAP * 2;
-    int height = GetRenderHeight() - UI_GAP * 3 - MESSAGE_INPUT_HEIGHT;
+    int height = GetRenderHeight() - UI_GAP * 2 - MESSAGE_INPUT_HEIGHT;
 
     BeginScissorMode(
-        x,
-        UI_GAP,
-        width,
+        SIDEBAR_WIDTH,
+        0,
+        width + UI_GAP * 2,
         height
     );
 
@@ -268,14 +289,19 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
         char *message = message_list[i];
         Vector2 position = (Vector2){x, y};
 
-        Vector2 text_size = draw_text_wrapped( width, font, message, position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR );
+        Color message_background = BACKGROUND_COLOR;
+        if( i % 2 != 0 ) {
+            message_background = ASSISTANT_MESSAGE_BACKGROUND;
+        }
 
-        int text_height = text_size.y;
-        message_list_height += text_height + MESSAGE_GAP;
-        y += text_height + MESSAGE_GAP;
+        Vector2 text_size = draw_text_wrapped( width, font, message, position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR, message_background );
+
+        int message_height = text_size.y;
+        message_list_height += message_height;
+        y += message_height;
     }
 
-    int max_scroll = UI_GAP - message_list_height + height;
+    int max_scroll = -message_list_height + height;
 
     if( current_scroll < max_scroll ) {
         current_scroll = max_scroll;
@@ -308,10 +334,10 @@ int main() {
     char chatgpt_response[JSON_MAX_LEN] = "\0";
     char chatgpt_response_content[MESSAGE_MAX_LEN] = "\0";
 
-#if 0
+#if 1
     message_list_add( message_list, &message_count, "First hello" );
     for( int i = 0; i < 50; i++ ) {
-        message_list_add( message_list, &message_count, "Hello, this is a very long message that should\nword-wrap when it goes to the end of the screen, what will happen?" );
+        message_list_add( message_list, &message_count, "Hello, this is a very long message that should\nword-wrap when it goes to\nthe end of the screen, what will happen?" );
     }
     message_list_add( message_list, &message_count, "Last hello" );
 #endif
