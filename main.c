@@ -12,6 +12,7 @@
 #define WINDOW_WIDTH 1152*SCALE_FACTOR
 #define WINDOW_HEIGHT 768*SCALE_FACTOR
 #define SIDEBAR_WIDTH 0.3*WINDOW_WIDTH
+#define SIDEBAR_BUTTON_HEIGHT 60
 #define UI_GAP 20
 
 #define BACKGROUND_COLOR (Color){69, 69, 69, 255}
@@ -19,8 +20,12 @@
 #define MESSAGE_INPUT_BACKGROUND (Color){55, 55, 55, 255}
 #define MESSAGE_COLOR (Color){255, 255, 255, 255}
 #define ASSISTANT_MESSAGE_BACKGROUND (Color){52, 52, 52, 255}
+#define SIDEBAR_BUTTON_BACKGROUND_COLOR (Color){255, 255, 255, 255}
+#define SIDEBAR_BUTTON_COLOR (Color){0, 0, 0, 255}
 
-#define MAX_MESSAGES 255
+#define MAX_CONVERSATIONS 25
+#define MAX_MESSAGES 50
+#define MAX_TITLE_LEN 64
 #define MESSAGE_MAX_LEN 2048
 #define LINE_MAX_LEN 1024
 #define MESSAGE_INPUT_HEIGHT 65
@@ -28,6 +33,7 @@
 #define MESSAGE_INPUT_FONT_SIZE 30
 #define MESSAGE_FONT_SIZE 30
 #define MESSAGE_PADDING 40
+#define SIDEBAR_BUTTON_FONT_SIZE 25
 #define JSON_MAX_LEN 2048
 #define SCROLL_SPEED 20
 
@@ -310,6 +316,55 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
     EndScissorMode();
 }
 
+void conversation_list_draw( char message_list[MAX_CONVERSATIONS][MAX_MESSAGES][MESSAGE_MAX_LEN], int *conversation_count, int *current_conversation, Font font ) {
+    int x = UI_GAP;
+    int y = UI_GAP;
+    int width = SIDEBAR_WIDTH - UI_GAP * 2;
+    int height = SIDEBAR_BUTTON_HEIGHT;
+
+    Rectangle rec = (Rectangle){ x, y, width, height };
+    DrawRectangleRounded( rec, 0.5f, 1, SIDEBAR_BUTTON_BACKGROUND_COLOR );
+
+    char button_text[MAX_TITLE_LEN] = "+ New chat";
+
+    Vector2 text_size = MeasureTextEx( font, button_text, SIDEBAR_BUTTON_FONT_SIZE, 0 );
+    int text_width = text_size.x;
+    int text_height = text_size.y;
+    int text_x = x + width / 2 - text_width / 2;
+    int text_y = y + height / 2 - text_height / 2;
+
+    DrawTextEx( font, button_text, (Vector2){text_x, text_y}, SIDEBAR_BUTTON_FONT_SIZE, 0, SIDEBAR_BUTTON_COLOR );
+
+    if( IsMouseButtonPressed( MOUSE_BUTTON_LEFT ) && CheckCollisionPointRec( GetMousePosition(), rec ) ) {
+        (*current_conversation)++;
+        (*conversation_count)++;
+    }
+
+    y += rec.height + UI_GAP;
+
+    for( int i = 0; i < *conversation_count; i++ ) {
+        Rectangle rec = (Rectangle){ x, y, width, height };
+        DrawRectangleRounded( rec, 0.5f, 1, SIDEBAR_BUTTON_BACKGROUND_COLOR );
+
+        char button_text[MAX_TITLE_LEN];
+        sprintf( button_text, "Conversation %d", i + 1 );
+
+        Vector2 text_size = MeasureTextEx( font, button_text, SIDEBAR_BUTTON_FONT_SIZE, 0 );
+        int text_width = text_size.x;
+        int text_height = text_size.y;
+        int text_x = x + width / 2 - text_width / 2;
+        int text_y = y + height / 2 - text_height / 2;
+
+        DrawTextEx( font, button_text, (Vector2){text_x, text_y}, SIDEBAR_BUTTON_FONT_SIZE, 0, SIDEBAR_BUTTON_COLOR );
+
+        if( IsMouseButtonPressed( MOUSE_BUTTON_LEFT ) && CheckCollisionPointRec( GetMousePosition(), rec ) ) {
+            *current_conversation = i;
+        }
+
+        y += rec.height + UI_GAP;
+    }
+}
+
 int main() {
     SetConfigFlags( FLAG_WINDOW_RESIZABLE );
     InitWindow( WINDOW_WIDTH, WINDOW_HEIGHT, "ChatGPT-C" );
@@ -326,8 +381,10 @@ int main() {
     Font font = LoadFont( "Ubuntu-R.ttf" );
     GuiSetFont( font );
 
-    char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN];
-    int message_count = 0;
+    char message_list[MAX_CONVERSATIONS][MAX_MESSAGES][MESSAGE_MAX_LEN];
+    int conversation_count = 1;
+    int current_conversation = 0;
+    int message_count[MAX_CONVERSATIONS];
 
     char user_message_buffer[MESSAGE_MAX_LEN] = "\0";
     char chatgpt_message[MESSAGE_MAX_LEN] = "\0";
@@ -335,11 +392,11 @@ int main() {
     char chatgpt_response_content[MESSAGE_MAX_LEN] = "\0";
 
 #if 1
-    message_list_add( message_list, &message_count, "First hello" );
+    message_list_add( message_list[current_conversation], &message_count[current_conversation], "First hello" );
     for( int i = 0; i < 50; i++ ) {
-        message_list_add( message_list, &message_count, "Hello, this is a very long message that should\nword-wrap when it goes to\nthe end of the screen, what will happen?" );
+        message_list_add( message_list[current_conversation], &message_count[current_conversation], "Hello, this is a very long message that should\nword-wrap when it goes to\nthe end of the screen, what will happen?" );
     }
-    message_list_add( message_list, &message_count, "Last hello" );
+    message_list_add( message_list[current_conversation], &message_count[current_conversation], "Last hello" );
 #endif
 
     while( ! WindowShouldClose() ) {
@@ -348,8 +405,9 @@ int main() {
         ClearBackground( BACKGROUND_COLOR );
 
         sidebar_draw();
+        conversation_list_draw( message_list, &conversation_count, &current_conversation, font );
         message_input_draw( user_message_buffer );
-        message_list_draw( message_list, message_count, font );
+        message_list_draw( message_list[current_conversation], message_count[current_conversation], font );
 
         EndDrawing();
 
@@ -367,11 +425,11 @@ int main() {
             strcpy( chatgpt_response, "\0" );
             strcpy( chatgpt_message, "\0" );
 
-            message_list_add( message_list, &message_count, chatgpt_response_content );
+            message_list_add( message_list[current_conversation], &message_count[current_conversation], chatgpt_response_content );
         }
 
         if( IsKeyPressed( KEY_ENTER ) && *user_message_buffer != '\0' ) {
-            message_list_add( message_list, &message_count, user_message_buffer );
+            message_list_add( message_list[current_conversation], &message_count[current_conversation], user_message_buffer );
             strcpy( chatgpt_message, user_message_buffer );
             strcpy( user_message_buffer, "\0" );
         }
