@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <ctype.h>
 #include <raylib.h>
 
 #define RAYGUI_IMPLEMENTATION
@@ -20,12 +21,14 @@
 
 #define MAX_MESSAGES 255
 #define MESSAGE_MAX_LEN 2048
+#define LINE_MAX_LEN 1024
 #define MESSAGE_INPUT_HEIGHT 65
 #define MESSAGE_INPUT_PADDING 25
 #define MESSAGE_INPUT_FONT_SIZE 30
 #define MESSAGE_FONT_SIZE 30
 #define MESSAGE_GAP 20
 #define JSON_MAX_LEN 2048
+#define SCROLL_SPEED 20
 
 size_t write_callback( void *content, size_t size, size_t nmemb, void *userp ) {
     size_t total_size = size * nmemb;
@@ -171,25 +174,120 @@ void message_list_add( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int *me
     strncpy( message_list[(*message_count)++], message, MESSAGE_MAX_LEN );
 }
 
+Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint ) {
+    int text_length = strlen( text );
+
+    char line_buffer[LINE_MAX_LEN] = "\0";
+    int line_index = 0;
+
+    int text_height = 0;
+    int text_space_pos = -1;
+    int line_space_pos = -1;
+
+    for( int text_index = 0; text_index < text_length; text_index++, line_index++ ) {
+        if( line_index > LINE_MAX_LEN - 2 ) {
+            fprintf( stderr, "ERROR: Line too long" );
+            break;
+        }
+
+        if( isspace( text[text_index] ) ) {
+            text_space_pos = text_index;
+            line_space_pos = line_index;
+        }
+
+        line_buffer[line_index] = text[text_index];
+        line_buffer[line_index + 1] = '\0';
+
+        Vector2 text_size = MeasureTextEx( font, line_buffer, fontSize, spacing );
+        int line_width = text_size.x;
+        int line_height = text_size.y;
+
+        bool is_newline = line_buffer[line_index] == '\n';
+        bool is_last_character = text_index == text_length - 1;
+        bool is_first_character = line_index == 0;
+
+        if( line_width > width || is_newline || is_last_character ) {
+            if( ! is_last_character && ! is_first_character )  {
+                if( line_space_pos > -1 ) {
+                    line_buffer[line_space_pos] = '\0';
+                } else {
+                    line_buffer[line_index] = '\0';
+                }
+            }
+
+            DrawTextEx( font, line_buffer, position, fontSize, spacing, tint );
+
+            position.y += line_height;
+            text_height += line_height;
+
+            if( ! is_newline && ! is_last_character && ! is_first_character ) {
+                if( line_space_pos > -1 ) {
+                    text_index = text_space_pos;
+                } else {
+                    text_index--;
+                }
+            }
+
+            line_index = -1;
+            line_space_pos = -1;
+        }
+
+    }
+
+    return (Vector2){width, text_height};
+}
+
 void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int message_count, Font font ) {
+    static int current_scroll = 0;
+    static float scroll = 0;
+
+    scroll += GetMouseWheelMove() * SCROLL_SPEED;
+    scroll *= 0.9;
+
+    current_scroll += scroll;
+
+    if( current_scroll > 0 ) {
+        current_scroll = 0;
+    }
+
     int x = SIDEBAR_WIDTH + UI_GAP;
-    int y = UI_GAP;
+    int y = UI_GAP + current_scroll;
+    int width = GetRenderWidth() - SIDEBAR_WIDTH - UI_GAP * 2;
+    int height = GetRenderHeight() - UI_GAP * 3 - MESSAGE_INPUT_HEIGHT;
+
+    BeginScissorMode(
+        x,
+        UI_GAP,
+        width,
+        height
+    );
+
+    int message_list_height = 0;
 
     for( int i = 0; i < message_count; i++ ) {
         char *message = message_list[i];
         Vector2 position = (Vector2){x, y};
-        Vector2 text_size = MeasureTextEx( font, message, MESSAGE_FONT_SIZE, 0 );
+
+        Vector2 text_size = draw_text_wrapped( width, font, message, position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR );
 
         int text_height = text_size.y;
-
-        DrawTextEx( font, message, position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR );
+        message_list_height += text_height + MESSAGE_GAP;
         y += text_height + MESSAGE_GAP;
     }
+
+    int max_scroll = UI_GAP - message_list_height + height;
+
+    if( current_scroll < max_scroll ) {
+        current_scroll = max_scroll;
+    }
+
+    EndScissorMode();
 }
 
 int main() {
     SetConfigFlags( FLAG_WINDOW_RESIZABLE );
     InitWindow( WINDOW_WIDTH, WINDOW_HEIGHT, "ChatGPT-C" );
+    SetWindowMinSize( 800, 600 );
 
     SetTargetFPS( 60 );
 
@@ -209,6 +307,14 @@ int main() {
     char chatgpt_message[MESSAGE_MAX_LEN] = "\0";
     char chatgpt_response[JSON_MAX_LEN] = "\0";
     char chatgpt_response_content[MESSAGE_MAX_LEN] = "\0";
+
+#if 0
+    message_list_add( message_list, &message_count, "First hello" );
+    for( int i = 0; i < 50; i++ ) {
+        message_list_add( message_list, &message_count, "Hello, this is a very long message that should\nword-wrap when it goes to the end of the screen, what will happen?" );
+    }
+    message_list_add( message_list, &message_count, "Last hello" );
+#endif
 
     while( ! WindowShouldClose() ) {
         BeginDrawing();
