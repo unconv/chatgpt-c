@@ -1,1 +1,1 @@
-gcc -o main main.c -lraylib -lm
+gcc -o main main.c cJSON/cJSON.c -lraylib -lm -lcurl
