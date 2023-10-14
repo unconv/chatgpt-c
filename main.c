@@ -53,14 +53,14 @@ char *chatgpt_get_response( char *response_buffer, char *user_message ) {
         return NULL;
     }
 
+    char authorization_header[128] = "Authorization: Bearer ";
+
     char *api_key = getenv( "OPENAI_API_KEY" );
     if( api_key == NULL ) {
         fprintf( stderr, "NOTICE: No OpenAI API key provided\n" );
-        char *api_key = "";
+    } else {
+        strcat( authorization_header, api_key );
     }
-
-    char authorization_header[128] = "Authorization: Bearer ";
-    strcat( authorization_header, api_key );
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append( headers, "Content-Type: application/json" );
@@ -89,12 +89,36 @@ char *chatgpt_get_response( char *response_buffer, char *user_message ) {
     return response_buffer;
 }
 
+char *handle_openai_error( char *content_buffer, cJSON *error ) {
+    cJSON *error_message = cJSON_GetObjectItem( error, "message" );
+
+    if( error_message == NULL ) {
+        fprintf( stderr, "ERROR: Unable to parse OpenAI error message: %s\n", cJSON_GetErrorPtr() );
+        return NULL;
+    }
+
+    if( ! cJSON_IsString( error_message ) ) {
+        fprintf( stderr, "ERROR: Error was not a string %s\n", cJSON_GetErrorPtr() );
+        return NULL;
+    }
+
+    strcpy( content_buffer, error_message->valuestring );
+
+    return content_buffer;
+}
+
 char *chatgpt_parse_json( char *content_buffer, char *json ) {
     cJSON *root = cJSON_Parse( json );
 
     if( root == NULL ) {
         fprintf( stderr, "ERROR: Unable to parse JSON: %s\n", cJSON_GetErrorPtr() );
         return NULL;
+    }
+
+    cJSON *error = cJSON_GetObjectItem( root, "error" );
+
+    if( error != NULL ) {
+        return handle_openai_error( content_buffer, error );
     }
 
     cJSON *choices = cJSON_GetObjectItem( root, "choices" );
@@ -414,12 +438,11 @@ int main() {
         if( *chatgpt_message != '\0' ) {
             if( chatgpt_get_response( chatgpt_response, chatgpt_message ) == NULL ) {
                 fprintf( stderr, "ERROR: There was an error in the ChatGPT request\n" );
-                return 1;
             }
 
             if( chatgpt_parse_json( chatgpt_response_content, chatgpt_response ) == NULL ) {
                 fprintf( stderr, "ERROR: There was an error in parsing the ChatGPT JSON\n" );
-                return 1;
+                strcpy( chatgpt_response_content, "I'm sorry, but something went wrong :(" );
             }
 
             strcpy( chatgpt_response, "\0" );
