@@ -23,8 +23,6 @@
 #define SIDEBAR_BUTTON_BACKGROUND_COLOR (Color){255, 255, 255, 255}
 #define SIDEBAR_BUTTON_COLOR (Color){0, 0, 0, 255}
 
-#define MAX_CONVERSATIONS 25
-#define MAX_MESSAGES 50
 #define MAX_TITLE_LEN 64
 #define MESSAGE_MAX_LEN 2048
 #define LINE_MAX_LEN 1024
@@ -36,6 +34,43 @@
 #define SIDEBAR_BUTTON_FONT_SIZE 25
 #define JSON_MAX_LEN 2048
 #define SCROLL_SPEED 20
+
+void message_add( char ***conversation, int *message_count, char *message ) {
+    *conversation = realloc( *conversation, sizeof( char * ) * (*message_count + 1) );
+    (*conversation)[*message_count] = malloc( strlen( message ) + 1 );
+    strcpy( (*conversation)[*message_count], message );
+    (*message_count)++;
+}
+
+void message_free( char *message ) {
+    free( message );
+}
+
+char **conversation_add( char ****conversations, int *conversation_count, int **message_count, int *current_conversation ) {
+    *conversations = realloc( *conversations, sizeof( char ** ) * (*conversation_count + 1) );
+    (*conversations)[*conversation_count] = malloc( sizeof( char * ) * 1 );
+    *message_count = realloc( *message_count, sizeof( int ) * (*conversation_count + 1) );
+    (*message_count)[*conversation_count] = 0;
+    (*conversation_count)++;
+    (*current_conversation)++;
+
+    return (*conversations)[*conversation_count - 1];
+}
+
+void conversation_free( char **conversation, int message_count ) {
+    for( int i = 0; i < message_count; i++ ) {
+        message_free( conversation[i] );
+    }
+    free( conversation );
+}
+
+void conversations_free( char ***conversations, int conversation_count, int *message_count ) {
+    for( int i = 0; i < conversation_count; i++ ) {
+        conversation_free( conversations[i], message_count[i] );
+    }
+    free( conversations );
+    free( message_count );
+}
 
 size_t write_callback( void *content, size_t size, size_t nmemb, void *userp ) {
     size_t total_size = size * nmemb;
@@ -201,10 +236,6 @@ void message_input_draw( char *text_buffer ) {
     GuiTextBox( text_bounds, text_buffer, MESSAGE_MAX_LEN, true );
 }
 
-void message_list_add( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int *message_count, char *message ) {
-    strncpy( message_list[(*message_count)++], message, MESSAGE_MAX_LEN );
-}
-
 Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 position, float fontSize, float spacing, Color text_color, Color background_color ) {
     int text_length = strlen( text );
 
@@ -288,7 +319,7 @@ Vector2 draw_text_wrapped( int width, Font font, const char *text, Vector2 posit
     return (Vector2){width, message_height};
 }
 
-void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int message_count, Font font ) {
+void message_list_draw( char **conversation, int message_count, Font font ) {
     static int current_scroll = 0;
     static float scroll = 0;
 
@@ -316,7 +347,6 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
     int message_list_height = 0;
 
     for( int i = 0; i < message_count; i++ ) {
-        char *message = message_list[i];
         Vector2 position = (Vector2){x, y};
 
         Color message_background = BACKGROUND_COLOR;
@@ -324,7 +354,7 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
             message_background = ASSISTANT_MESSAGE_BACKGROUND;
         }
 
-        Vector2 text_size = draw_text_wrapped( width, font, message, position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR, message_background );
+        Vector2 text_size = draw_text_wrapped( width, font, conversation[i], position, MESSAGE_FONT_SIZE, 0, MESSAGE_COLOR, message_background );
 
         int message_height = text_size.y;
         message_list_height += message_height;
@@ -340,7 +370,7 @@ void message_list_draw( char message_list[MAX_MESSAGES][MESSAGE_MAX_LEN], int me
     EndScissorMode();
 }
 
-void conversation_list_draw( char message_list[MAX_CONVERSATIONS][MAX_MESSAGES][MESSAGE_MAX_LEN], int *conversation_count, int *current_conversation, Font font ) {
+void conversation_list_draw( char ****conversations, int *conversation_count, int *current_conversation, int **message_count, Font font ) {
     int x = UI_GAP;
     int y = UI_GAP;
     int width = SIDEBAR_WIDTH - UI_GAP * 2;
@@ -360,8 +390,7 @@ void conversation_list_draw( char message_list[MAX_CONVERSATIONS][MAX_MESSAGES][
     DrawTextEx( font, button_text, (Vector2){text_x, text_y}, SIDEBAR_BUTTON_FONT_SIZE, 0, SIDEBAR_BUTTON_COLOR );
 
     if( IsMouseButtonPressed( MOUSE_BUTTON_LEFT ) && CheckCollisionPointRec( GetMousePosition(), rec ) ) {
-        (*current_conversation)++;
-        (*conversation_count)++;
+        conversation_add( conversations, conversation_count, message_count, current_conversation );
     }
 
     y += rec.height + UI_GAP;
@@ -405,22 +434,25 @@ int main() {
     Font font = LoadFont( "Ubuntu-R.ttf" );
     GuiSetFont( font );
 
-    char message_list[MAX_CONVERSATIONS][MAX_MESSAGES][MESSAGE_MAX_LEN];
-    int conversation_count = 1;
-    int current_conversation = 0;
-    int message_count[MAX_CONVERSATIONS];
+    char ***conversations = NULL;
+    int conversation_count = 0;
+    int *message_count = NULL;
+    int current_conversation = -1;
+
+    conversation_add( &conversations, &conversation_count, &message_count, &current_conversation );
 
     char user_message_buffer[MESSAGE_MAX_LEN] = "\0";
     char chatgpt_message[MESSAGE_MAX_LEN] = "\0";
     char chatgpt_response[JSON_MAX_LEN] = "\0";
     char chatgpt_response_content[MESSAGE_MAX_LEN] = "\0";
 
-#if 1
-    message_list_add( message_list[current_conversation], &message_count[current_conversation], "First hello" );
-    for( int i = 0; i < 50; i++ ) {
-        message_list_add( message_list[current_conversation], &message_count[current_conversation], "Hello, this is a very long message that should\nword-wrap when it goes to\nthe end of the screen, what will happen?" );
+#if 0
+    message_add( &conversations[current_conversation], &message_count[current_conversation], "First hello" );
+
+    for( int i = 0; i < 30; i++ ) {
+        message_add( &conversations[current_conversation], &message_count[current_conversation], "Hello, this is a very long message that should word-wrap when it goes to the end of the screen, what will happen?\n\nAnd here's another paragraph and\na newline" );
     }
-    message_list_add( message_list[current_conversation], &message_count[current_conversation], "Last hello" );
+    message_add( &conversations[current_conversation], &message_count[current_conversation], "Last hello" );
 #endif
 
     while( ! WindowShouldClose() ) {
@@ -429,9 +461,9 @@ int main() {
         ClearBackground( BACKGROUND_COLOR );
 
         sidebar_draw();
-        conversation_list_draw( message_list, &conversation_count, &current_conversation, font );
+        conversation_list_draw( &conversations, &conversation_count, &current_conversation, &message_count, font );
         message_input_draw( user_message_buffer );
-        message_list_draw( message_list[current_conversation], message_count[current_conversation], font );
+        message_list_draw( conversations[current_conversation], message_count[current_conversation], font );
 
         EndDrawing();
 
@@ -448,11 +480,11 @@ int main() {
             strcpy( chatgpt_response, "\0" );
             strcpy( chatgpt_message, "\0" );
 
-            message_list_add( message_list[current_conversation], &message_count[current_conversation], chatgpt_response_content );
+            message_add( &conversations[current_conversation], &message_count[current_conversation], chatgpt_response_content );
         }
 
         if( IsKeyPressed( KEY_ENTER ) && *user_message_buffer != '\0' ) {
-            message_list_add( message_list[current_conversation], &message_count[current_conversation], user_message_buffer );
+            message_add( &conversations[current_conversation], &message_count[current_conversation], user_message_buffer );
             strcpy( chatgpt_message, user_message_buffer );
             strcpy( user_message_buffer, "\0" );
         }
@@ -460,6 +492,8 @@ int main() {
 
     UnloadFont( font );
     CloseWindow();
+
+    conversations_free( conversations, conversation_count, message_count );
 
     return 0;
 }
